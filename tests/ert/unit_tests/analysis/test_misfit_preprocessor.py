@@ -475,23 +475,43 @@ def test_that_clustering_prioritizes_global_similarity_over_local_correlation(
 
 def test_that_error_scaling_discards_noisy_observations_in_pca():
     """
-    Documents current behavior: when scaling responses by observation error
-    (Y / obs_errors), precise observations dominate and noisy observations
-    are effectively discarded by PCA truncation.
+    This is a unit test for the function get_nr_primary_components.
+    This function is responsible for two key components of the autoscaler:
 
-    Scenario: 500 noisy seismic amplitudes + 20 precise well pressures,
-    where seismic responds to a shallow parameter and pressure responds
-    to an independent deep parameter.
+    1. Determining the number of clusters.
+    2. Determining the scaling factor for each cluster.
 
-    With error-scaling (divide by obs_errors):
-    - Precise pressure measurements get amplified
-    - Noisy seismic measurements get suppressed
-    - Result: 1 PC needed (pressure dominates, seismic info lost)
+    Scenario:
+    We are given 500 noisy seismic observations and 20 precise well pressure
+    observations. All the seismic observations are correlated and all the
+    pressure observations are correlated, but the seismic and the pressure observations
+    are independent of each other.
 
-    With StandardScaler (z-score, unit variance per observation):
-    - Both observation types are treated equally
-    - Result: 2 PCs needed (both independent directions preserved)
+    Intuitive behavior:
+    The autoscaler should identify two clusters, one for the seismic observations and
+    one for the pressure observations, and assign a scaling factor to each cluster based
+    on the number of observations in that cluster (sqrt(500) for seismic and sqrt(20)
+    for pressure).
+
+    Actual behavior with current implementation:
+    One cluster with scaling factor sqrt(520).
+
+    Explanation of clustering:
+    The function get_nr_primary_components uses PCA to determine the number
+    of clusters. When using PCA it is common to normalize the data before calculating
+    the principal components (e.g., using StandardScaler to give each observation unit
+    variance). However, the current implementation scales the responses by the
+    observation errors instead. This means that the precise pressure observations are
+    amplified and the noisy seismic observations are suppressed. As a result, the PCA
+    identifies only one principal component, and hence, get_nr_primary_components
+    returns 1, leading to only one cluster.
+
+    Explanation of scaling factor:
+    The scaling factor is calculated as
+    sqrt(num_observations_in_cluster / num_components), where num_components is
+    calculated by running the function get_nr_primary_components on each cluster.
     """
+
     rng = np.random.default_rng(42)
     n_realizations = 100
 
@@ -502,14 +522,28 @@ def test_that_error_scaling_discards_noisy_observations_in_pca():
     param_shallow = rng.normal(0, 1, size=(n_realizations, 1))
     param_deep = rng.normal(0, 1, size=(n_realizations, 1))
 
+    # Initilize data by using broadcasting to create the correlated structures:
+
+    # - Seismic responses = param_shallow * sensitivity,
+    #   (all 500 seismic obs are linear combinations of the same parameter to create
+    #   within-group correlation)
+
+    # - Pressure responses = param_deep * sensitivity,
+    #   (all 20 pressure obs are linear combinations of a different parameter)
+
+    # - Since param_shallow and param_deep are independent, this results in
+    #   the sismic responses being independent from the pressure responses.
+
     # Seismic: sensitive to shallow param
     seismic_sensitivity = rng.uniform(0.5, 1.5, size=(1, n_seismic))
     seismic_responses = param_shallow @ seismic_sensitivity
+    # Add noise
     seismic_responses += rng.normal(0, 0.1, size=(n_realizations, n_seismic))
 
     # Pressure: sensitive to deep param (independent of seismic)
     pressure_sensitivity = rng.uniform(0.5, 1.5, size=(1, n_pressure))
     pressure_responses = param_deep @ pressure_sensitivity
+    # Add noise
     pressure_responses += rng.normal(0, 0.1, size=(n_realizations, n_pressure))
 
     responses = np.hstack([seismic_responses, pressure_responses])
@@ -531,13 +565,13 @@ def test_that_error_scaling_discards_noisy_observations_in_pca():
         scaled_standard, threshold=0.95
     )
 
-    # With error scaling, precise observations dominate → only 1 PC needed
+    # With error scaling, precise observations dominate → only 1 PC
     assert n_components_error_scaling == 1, (
         f"Error scaling should yield 1 PC (pressure dominates), "
         f"got {n_components_error_scaling}"
     )
 
-    # With standard scaling, both independent directions are visible → 2 PCs needed
+    # With standard scaling, both independent directions are visible → 2 PCs
     assert n_components_standard_scaling == 2, (
         f"Standard scaling should yield 2 PCs (both groups visible), "
         f"got {n_components_standard_scaling}"
