@@ -475,8 +475,7 @@ def test_that_clustering_prioritizes_global_similarity_over_local_correlation(
 
 def test_that_error_scaling_discards_noisy_observations_in_pca():
     """
-    This is a unit test for the function get_nr_primary_components.
-    This function is responsible for two key components of the autoscaler:
+    This is an integration test for two key components of the autoscaler:
 
     1. Determining the number of clusters.
     2. Determining the scaling factor for each cluster.
@@ -497,19 +496,19 @@ def test_that_error_scaling_discards_noisy_observations_in_pca():
     One cluster with scaling factor sqrt(520).
 
     Explanation of clustering:
-    The function get_nr_primary_components uses PCA to determine the number
-    of clusters. When using PCA it is common to normalize the data before calculating
-    the principal components (e.g., using StandardScaler to give each observation unit
-    variance). However, the current implementation scales the responses by the
-    observation errors instead. This means that the precise pressure observations are
-    amplified and the noisy seismic observations are suppressed. As a result, the PCA
-    identifies only one principal component, and hence, get_nr_primary_components
-    returns 1, leading to only one cluster.
+    The autoscaler uses PCA to determine the number of clusters. When using PCA it is
+    common to normalize the data before calculating the principal components
+    (e.g., using StandardScaler to give each observation unit variance). However,
+    the current implementation scales the responses by the observation errors instead.
+    This means that the precise pressure observations are amplified and the noisy
+    seismic observations are suppressed. As a result, the PCA identifies only one
+    principal component, and hence, everything is grouped into one cluster.
 
     Explanation of scaling factor:
-    The scaling factor is calculated as
+    The scaling factor for a cluster is calculated as
     sqrt(num_observations_in_cluster / num_components), where num_components is
-    calculated by running the function get_nr_primary_components on each cluster.
+    calculated by doing PCA on the elements of the cluster (stopping when 95% of the
+    total variance is explained).
     """
 
     rng = np.random.default_rng(42)
@@ -553,29 +552,15 @@ def test_that_error_scaling_discards_noisy_observations_in_pca():
     pressure_errors = np.full(n_pressure, 0.05)
     obs_errors = np.hstack([seismic_errors, pressure_errors])
 
-    # Method A: Error scaling (current approach)
-    scaled_by_error = responses / obs_errors
-    n_components_error_scaling = get_nr_primary_components(
-        scaled_by_error, threshold=0.95
-    )
+    # Run the main function to get clusters and scaling factors
+    scale_factors, clusters, _ = main(responses.T, obs_errors)
 
-    # Method B: Standard scaling (z-score)
-    scaled_standard = (responses - responses.mean(axis=0)) / responses.std(axis=0)
-    n_components_standard_scaling = get_nr_primary_components(
-        scaled_standard, threshold=0.95
-    )
+    # Assert that all observations are in the same cluster
+    assert len(np.unique(clusters)) == 1
 
-    # With error scaling, precise observations dominate → only 1 PC
-    assert n_components_error_scaling == 1, (
-        f"Error scaling should yield 1 PC (pressure dominates), "
-        f"got {n_components_error_scaling}"
-    )
-
-    # With standard scaling, both independent directions are visible → 2 PCs
-    assert n_components_standard_scaling == 2, (
-        f"Standard scaling should yield 2 PCs (both groups visible), "
-        f"got {n_components_standard_scaling}"
-    )
+    # Assert that the scaling factor is sqrt(520) for all observations
+    expected_sf = np.sqrt(n_seismic + n_pressure)
+    assert np.allclose(scale_factors, expected_sf)
 
 
 def test_independent_measurments_clustered_together_in_case_of_irregular_obs_errors():
