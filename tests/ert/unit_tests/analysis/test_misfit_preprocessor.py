@@ -473,7 +473,7 @@ def test_that_clustering_prioritizes_global_similarity_over_local_correlation(
         assert not is_BC_merged, failure_msg
 
 
-def test_that_error_scaling_discards_noisy_observations_in_pca():
+def test_clustering_and_scaling_1():
     """
     This is an integration test for two key components of the autoscaler:
 
@@ -563,7 +563,7 @@ def test_that_error_scaling_discards_noisy_observations_in_pca():
     assert np.allclose(scale_factors, expected_sf)
 
 
-def test_independent_measurments_clustered_together_in_case_of_irregular_obs_errors():
+def test_clustering_and_scaling_2():
     """
     This test demonstrates that when observations have irregular errors, the
     current clustering approach can lead to unintuitive results where independent
@@ -587,9 +587,15 @@ def test_independent_measurments_clustered_together_in_case_of_irregular_obs_err
     # Create irregular observation errors: one small, the rest large
     obs_errors = np.array([0.1] + [10.0] * (n_observations - 1))
 
-    # run clustering algorithm
-    _, clusters, _ = main(responses, obs_errors)
+    # Run clustering algorithm
+    scale_factors, clusters, _ = main(responses, obs_errors)
 
     # Assert that all observations are clustered together (only 1 cluster)
-    assert len(clusters) == 100
     assert len(np.unique(clusters)) == 1
+
+    # Assert deflation rate
+    # For independent observations, the scaling factor should be 1
+    # but since all overvations are clustered together and treated as perfectly
+    # correlated, the scaling factor becomes sqrt(100) = 10
+    assert len(np.unique(scale_factors)) == 1
+    assert np.allclose(scale_factors, np.sqrt(100))
