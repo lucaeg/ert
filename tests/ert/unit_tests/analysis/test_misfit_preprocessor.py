@@ -473,7 +473,7 @@ def test_that_clustering_prioritizes_global_similarity_over_local_correlation(
         assert not is_BC_merged, failure_msg
 
 
-def test_clustering_and_scaling_1():
+def test_clustering_and_scaling_realistic_scenario():
     """
     This is an integration test for two key components of the autoscaler:
 
@@ -521,7 +521,7 @@ def test_clustering_and_scaling_1():
     param_shallow = rng.normal(0, 1, size=(n_realizations, 1))
     param_deep = rng.normal(0, 1, size=(n_realizations, 1))
 
-    # Initilize data by using broadcasting to create the correlated structures:
+    # Initialize data by using broadcasting to create the correlated structures:
 
     # - Seismic responses = param_shallow * sensitivity,
     #   (all 500 seismic obs are linear combinations of the same parameter to create
@@ -531,7 +531,7 @@ def test_clustering_and_scaling_1():
     #   (all 20 pressure obs are linear combinations of a different parameter)
 
     # - Since param_shallow and param_deep are independent, this results in
-    #   the sismic responses being independent from the pressure responses.
+    #   the seismic responses being independent from the pressure responses.
 
     # Seismic: sensitive to shallow param
     seismic_sensitivity = rng.uniform(0.5, 1.5, size=(1, n_seismic))
@@ -559,11 +559,16 @@ def test_clustering_and_scaling_1():
     assert len(np.unique(clusters)) == 1
 
     # Assert that the scaling factor is sqrt(520) for all observations
+    # note that this results in the pressure observations receiving a scaling
+    # factor of sqrt(520) instead of sqrt(20), which means that they are significantly
+    # deflated compared to what one would expect, and essentially ignored/suppressed by
+    # the updating algorithm, even though the observations are precise and should be
+    # influential.
     expected_sf = np.sqrt(n_seismic + n_pressure)
     assert np.allclose(scale_factors, expected_sf)
 
 
-def test_clustering_and_scaling_2():
+def test_clustering_and_scaling_edge_case():
     """
     This test demonstrates that when observations have irregular errors, the
     current clustering approach can lead to unintuitive results where independent
